@@ -363,6 +363,7 @@ done: /* delete the transformed LP, if it exists */
 
 int glp_simplex(glp_prob *P, const glp_smcp *parm)
 {     /* solve LP problem with the simplex method */
+      xprintf("test if we can really modify the codes.");
       glp_smcp _parm;
       int i, j, ret;
       /* check problem object */
