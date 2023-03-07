@@ -1214,7 +1214,6 @@ void spy_update_r(SPXLP *lp, int p, int q, const double beta[/*1+m*/],
 *
 *  GLP_EFAIL
 *     The solver failed to solve LP instance. */
-
 static int dual_simplex(struct csa *csa)
 {     /* dual simplex method main logic routine */
       glp_file *file_my;

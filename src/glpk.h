@@ -105,6 +105,7 @@ typedef struct
 
 typedef struct
 {     /* simplex solver control parameters */
+      double UB;
       int msg_lev;            /* message level: */
 #define GLP_MSG_OFF        0  /* no output */
 #define GLP_MSG_ERR        1  /* warning and error messages only */

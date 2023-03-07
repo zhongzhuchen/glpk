@@ -498,7 +498,9 @@ done: /* return to the application program */
 *  structure, which the parameter parm points to. */
 
 void glp_init_smcp(glp_smcp *parm)
-{     parm->msg_lev = GLP_MSG_ALL;
+{     
+      parm->UB = +DBL_MAX;
+      parm->msg_lev = GLP_MSG_ALL;
       parm->meth = GLP_PRIMAL;
       parm->pricing = GLP_PT_PSE;
       parm->r_test = GLP_RT_HAR;
