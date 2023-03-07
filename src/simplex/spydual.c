@@ -38,6 +38,7 @@
 
 #define CHECK_ACCURACY 0
 /* (for debugging) */
+#define xfprintf glp_format
 
 struct csa
 {     /* common storage area */
@@ -1216,6 +1217,19 @@ void spy_update_r(SPXLP *lp, int p, int q, const double beta[/*1+m*/],
 
 static int dual_simplex(struct csa *csa)
 {     /* dual simplex method main logic routine */
+      glp_file *file_my;
+      char filename[] = "output.txt";
+      // Open the file in write mode
+      file_my = glp_open(filename, "w");
+      // Check if the file was opened successfully
+      if (file_my == NULL) {
+         printf("Failed to open file\n");
+         return 1;
+      }
+      // xfprintf(file_my, "We are in dual_simplex.\n");
+      // Close the file
+      glp_close(file_my);
+
       SPXLP *lp = csa->lp;
       int m = lp->m;
       int n = lp->n;
