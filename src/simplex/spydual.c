@@ -20,7 +20,7 @@
 ***********************************************************************/
 
 #if 1 /* 18/VII-2017 */
-#define SCALE_Z 1
+#define SCALE_Z 0 /*disable scale*/
 #endif
 
 #include "env.h"
@@ -45,6 +45,7 @@ struct csa
       SPXLP *lp;
       /* LP problem data and its (current) basis; this LP has m rows
        * and n columns */
+      double UB;
       int dir;
       /* original optimization direction:
        * +1 - minimization
@@ -1855,6 +1856,7 @@ int spy_dual(glp_prob *P, const glp_smcp *parm)
 #endif
       /* build working LP and its initial basis */
       memset(csa, 0, sizeof(struct csa));
+      csa->UB = parm->UB;
       csa->lp = &lp;
       spx_init_lp(csa->lp, P, parm->excl);
       spx_alloc_lp(csa->lp);
