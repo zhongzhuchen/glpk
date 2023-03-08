@@ -20,7 +20,7 @@
 ***********************************************************************/
 
 #if 1 /* 18/VII-2017 */
-#define SCALE_Z 0 /*disable scale*/
+#define SCALE_Z 1 
 #endif
 
 #include "env.h"
@@ -1216,19 +1216,22 @@ void spy_update_r(SPXLP *lp, int p, int q, const double beta[/*1+m*/],
 *  GLP_EFAIL
 *     The solver failed to solve LP instance. */
 static int dual_simplex(struct csa *csa)
-{     /* dual simplex method main logic routine */
-      glp_file *file_my;
-      char filename[] = "output.txt";
+{     /* create and open file for recording variable fix*/
+      glp_file *varfix0, *varfix1;
+      char filename0[] = "varfix0.txt";
+      char filename1[] = "varfix1.txt";
       // Open the file in write mode
-      file_my = glp_open(filename, "w");
+      varfix0 = glp_open(filename0, "w");
+      varfix1 = glp_open(filename1, "w");
       // Check if the file was opened successfully
-      if (file_my == NULL) {
+      if (varfix0 == NULL) {
          printf("Failed to open file\n");
          return 1;
       }
-      // xfprintf(file_my, "We are in dual_simplex.\n");
-      // Close the file
-      glp_close(file_my);
+      if (varfix1 == NULL) {
+         printf("Failed to open file\n");
+         return 1;
+      }
 
       SPXLP *lp = csa->lp;
       int m = lp->m;
@@ -1826,6 +1829,36 @@ skip1:      ;
          play_coef(csa, 0);
       /* dual simplex iteration complete */
       csa->it_cnt++;
+
+      /* Customized Method for reduced-cost fixing:
+      Assumption: all the variables we consider here are binary.
+      Criterion: suppose we have a dual feasible solution with objective
+      value z. The reduced cost for one non-basic variable x_j is d_j. The
+      upper bound for the optimal value of the mixed-integer programming 
+      is UB. Then:
+      1. if the nonbasic variable x_j is at its lower bound 0, and if z+d_j
+      > UB, then we can fix x_j = 0.
+      2. if the nonbasic variable x_j is at its upper bound 1, and if z-d_j
+      > UB, then we can fix x_j =1.   
+      */
+      double z = spx_eval_obj(lp, beta)*csa->fz; /*evaluate objective value*/
+      double UB = csa->UB;
+      for (j = 1; j <= n-m; j++)
+      {  
+         if (d[j] > 0.0 && z+d[j] > UB)
+         {
+            k = head[m+j];
+            if (k > m)
+               xfprintf(varfix0, "%d\n", k-m);
+         }
+         if (d[j] < 0.0 && z-d[j] > UB)
+         {
+            k = head[m+j];
+            if (k > m)
+               xfprintf(varfix1, "%d\n", k-m);   
+         }
+      }
+
       goto loop;
 fini:
 #ifdef TIMING
@@ -1840,6 +1873,9 @@ fini:
       xprintf("Updating N      = %10.3f\n", t_upd4);
       xprintf("Updating inv(B) = %10.3f\n", t_upd5);
 #endif
+      // Close the file
+      glp_close(varfix0);
+      glp_close(varfix1);
       return ret;
 }
 
