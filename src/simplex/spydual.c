@@ -1216,7 +1216,8 @@ void spy_update_r(SPXLP *lp, int p, int q, const double beta[/*1+m*/],
 *  GLP_EFAIL
 *     The solver failed to solve LP instance. */
 static int dual_simplex(struct csa *csa)
-{     /* create and open file for recording variable fix*/
+{     /* create and open file for recording variable fix */
+      xprintf("Scaling parameter: %f.\n", csa->fz);
       glp_file *varfix0, *varfix1;
       char filename0[] = "varfix0.txt";
       char filename1[] = "varfix1.txt";
@@ -1243,6 +1244,13 @@ static int dual_simplex(struct csa *csa)
       double *beta = csa->beta;
       double *d = csa->d;
       SPYSE *se = csa->se;
+
+      /* storing dual objective */
+      double eval_dualobj;
+      /* create two array for recording fixed variables*/
+      int varfix0_array[n-m+1], varfix1_array[n-m+1];
+      memset(varfix0_array, 0, sizeof(varfix0_array));
+      memset(varfix1_array, 0, sizeof(varfix1_array));
 #if 0 /* 30/III-2016 */
       int *list = csa->list;
 #endif
@@ -1384,6 +1392,46 @@ loop: /* main loop starts here */
          }
       }
 #endif
+      /* Customized Method for reduced-cost fixing:
+      Assumption: all the variables we consider here are binary.
+      Criterion: suppose we have a dual feasible solution with objective
+      value z. The reduced cost for one non-basic variable x_j is d_j. The
+      upper bound for the optimal value of the mixed-integer programming 
+      is UB. Then:
+      1. if the nonbasic variable x_j is at its lower bound 0, and if z+d_j
+      > UB, then we can fix x_j = 0.
+      2. if the nonbasic variable x_j is at its upper bound 1, and if z-d_j
+      > UB, then we can fix x_j =1.   
+      */
+      if (csa->phase == 2 && !csa->d_st)
+      {  /* evaluate dual objective value*/
+         eval_dualobj = 0.0;
+         eval_dualobj+=lp->c[0];
+         // spx_eval_pi(lp, pi);
+         for (j = 1; j <= m; j++)
+         {
+            eval_dualobj+=pi[j]*lp->b[j];
+         }
+         /* obtain upper bound */
+         double UB = csa->UB;
+         for (j = 1; j <= n-m; j++)
+         {  
+            if (d[j] > 0.0 && eval_dualobj+d[j] > UB+1e-10)
+            {
+               k = head[m+j];
+               if (k > m)
+                  varfix0_array[k-m] = 1;
+                  // xfprintf(varfix0, "%d\n", k-m);
+            }
+            if (d[j] < 0.0 && eval_dualobj-d[j] > UB+1e-10)
+            {
+               k = head[m+j];
+               if (k > m)
+                  varfix1_array[k-m] = 1;
+                  // xfprintf(varfix1, "%d\n", k-m);   
+            }
+         }
+      }
       /* at this point the search phase is determined */
       xassert(csa->phase == 1 || csa->phase == 2);
       /* compute values of basic variables beta = (beta[i]) */
@@ -1830,35 +1878,6 @@ skip1:      ;
       /* dual simplex iteration complete */
       csa->it_cnt++;
 
-      /* Customized Method for reduced-cost fixing:
-      Assumption: all the variables we consider here are binary.
-      Criterion: suppose we have a dual feasible solution with objective
-      value z. The reduced cost for one non-basic variable x_j is d_j. The
-      upper bound for the optimal value of the mixed-integer programming 
-      is UB. Then:
-      1. if the nonbasic variable x_j is at its lower bound 0, and if z+d_j
-      > UB, then we can fix x_j = 0.
-      2. if the nonbasic variable x_j is at its upper bound 1, and if z-d_j
-      > UB, then we can fix x_j =1.   
-      */
-      double z = spx_eval_obj(lp, beta)*csa->fz; /*evaluate objective value*/
-      double UB = csa->UB;
-      for (j = 1; j <= n-m; j++)
-      {  
-         if (d[j] > 0.0 && z+d[j] > UB)
-         {
-            k = head[m+j];
-            if (k > m)
-               xfprintf(varfix0, "%d\n", k-m);
-         }
-         if (d[j] < 0.0 && z-d[j] > UB)
-         {
-            k = head[m+j];
-            if (k > m)
-               xfprintf(varfix1, "%d\n", k-m);   
-         }
-      }
-
       goto loop;
 fini:
 #ifdef TIMING
@@ -1874,6 +1893,13 @@ fini:
       xprintf("Updating inv(B) = %10.3f\n", t_upd5);
 #endif
       // Close the file
+      for (j = 1; j <= n-m; j++)
+      {
+         if (varfix0_array[j] == 1)
+            xfprintf(varfix0, "%d\n", j);
+         if (varfix1_array[j] == 1)
+            xfprintf(varfix1, "%d\n", j);
+      }
       glp_close(varfix0);
       glp_close(varfix1);
       return ret;
