@@ -1218,12 +1218,14 @@ void spy_update_r(SPXLP *lp, int p, int q, const double beta[/*1+m*/],
 static int dual_simplex(struct csa *csa)
 {     /* create and open file for recording variable fix */
       xprintf("Scaling parameter: %f.\n", csa->fz);
-      glp_file *varfix0, *varfix1;
+      glp_file *varfix0, *varfix1, *varfix_itr;
       char filename0[] = "varfix0.txt";
       char filename1[] = "varfix1.txt";
+      char filename2[] = "varfix_itr.txt";
       // Open the file in write mode
       varfix0 = glp_open(filename0, "w");
       varfix1 = glp_open(filename1, "w");
+      varfix_itr = glp_open(filename2, "w");
       // Check if the file was opened successfully
       if (varfix0 == NULL) {
          printf("Failed to open file\n");
@@ -1233,8 +1235,13 @@ static int dual_simplex(struct csa *csa)
          printf("Failed to open file\n");
          return 1;
       }
+      if (varfix_itr == NULL) {
+         printf("Failed to open file\n");
+         return 1;
+      }
 
       SPXLP *lp = csa->lp;
+      double *orig_c = csa->orig_c;
       int m = lp->m;
       int n = lp->n;
       double *l = lp->l;
@@ -1245,12 +1252,15 @@ static int dual_simplex(struct csa *csa)
       double *d = csa->d;
       SPYSE *se = csa->se;
 
-      /* storing dual objective */
-      double eval_dualobj;
       /* create two array for recording fixed variables*/
       int varfix0_array[n-m+1], varfix1_array[n-m+1];
       memset(varfix0_array, 0, sizeof(varfix0_array));
       memset(varfix1_array, 0, sizeof(varfix1_array));
+      /* number of fixed variables of each type*/
+      int varfix0count, varfix1count, varfixintseccount;
+      varfix0count = varfix1count = varfixintseccount = 0;
+      /* number of fixed variables each iteration*/
+      int varfix_itrcount = 0;
 #if 0 /* 30/III-2016 */
       int *list = csa->list;
 #endif
@@ -1392,46 +1402,6 @@ loop: /* main loop starts here */
          }
       }
 #endif
-      /* Customized Method for reduced-cost fixing:
-      Assumption: all the variables we consider here are binary.
-      Criterion: suppose we have a dual feasible solution with objective
-      value z. The reduced cost for one non-basic variable x_j is d_j. The
-      upper bound for the optimal value of the mixed-integer programming 
-      is UB. Then:
-      1. if the nonbasic variable x_j is at its lower bound 0, and if z+d_j
-      > UB, then we can fix x_j = 0.
-      2. if the nonbasic variable x_j is at its upper bound 1, and if z-d_j
-      > UB, then we can fix x_j =1.   
-      */
-      if (csa->phase == 2 && !csa->d_st)
-      {  /* evaluate dual objective value*/
-         eval_dualobj = 0.0;
-         eval_dualobj+=lp->c[0];
-         // spx_eval_pi(lp, pi);
-         for (j = 1; j <= m; j++)
-         {
-            eval_dualobj+=pi[j]*lp->b[j];
-         }
-         /* obtain upper bound */
-         double UB = csa->UB;
-         for (j = 1; j <= n-m; j++)
-         {  
-            if (d[j] > 0.0 && eval_dualobj+d[j] > UB+1e-10)
-            {
-               k = head[m+j];
-               if (k > m)
-                  varfix0_array[k-m] = 1;
-                  // xfprintf(varfix0, "%d\n", k-m);
-            }
-            if (d[j] < 0.0 && eval_dualobj-d[j] > UB+1e-10)
-            {
-               k = head[m+j];
-               if (k > m)
-                  varfix1_array[k-m] = 1;
-                  // xfprintf(varfix1, "%d\n", k-m);   
-            }
-         }
-      }
       /* at this point the search phase is determined */
       xassert(csa->phase == 1 || csa->phase == 2);
       /* compute values of basic variables beta = (beta[i]) */
@@ -1877,6 +1847,74 @@ skip1:      ;
          play_coef(csa, 0);
       /* dual simplex iteration complete */
       csa->it_cnt++;
+      /* Customized Method for reduced-cost fixing:
+      Assumption: all the variables we consider here are binary.
+      Criterion: suppose we have a dual feasible solution with objective
+      value z. The reduced cost for one non-basic variable x_j is d_j. The
+      upper bound for the optimal value of the mixed-integer programming 
+      is UB. Then:
+      1. if the nonbasic variable x_j is at its lower bound 0, and if z+d_j
+      > UB, then we can fix x_j = 0.
+      2. if the nonbasic variable x_j is at its upper bound 1, and if z-d_j
+      > UB, then we can fix x_j =1.   
+      */
+      if (csa->phase == 2)
+      {  /* evaluate dual objective value, use original c instead of perturbed
+         c to get the correct objective value
+         */
+         char *flag = lp->flag;
+         int i, j, k;
+         double fj, z;
+         varfix_itrcount = 0;
+         /* compute z = orig_cB'* beta + orig_cN'* f + orig_c0 */
+         /* z := orig_c0 */
+         z = orig_c[0];
+         /* z := z + cB'* beta */
+         for (i = 1; i <= m; i++)
+         {  k = head[i]; /* x[k] = xB[i] */
+            z += orig_c[k] * beta[i];
+         }
+         /* z := z + cN'* f */
+         for (j = 1; j <= n-m; j++)
+         {  k = head[m+j]; /* x[k] = xN[j] */
+            /* f[j] := active bound of xN[j] */
+            fj = flag[j] ? u[k] : l[k];
+            if (fj == 0.0 || fj == -DBL_MAX)
+            {  /* either xN[j] has zero active bound or it is unbounded;
+               * in the latter case its value is assumed to be zero */
+               continue;
+            }
+            z += orig_c[k] * fj;
+         }
+         /* compensate for objective scaling */
+         z *= csa->fz;
+         /* obtain upper bound */
+         double UB = csa->UB;
+         for (j = 1; j <= n-m; j++)
+         {  
+            if (d[j] > 1e-6 && z+d[j] > UB+1e-6)
+            {
+               k = head[m+j];
+               if (k > m)
+               {
+                  varfix0_array[k-m] = 1;
+                  varfix_itrcount += 1;
+               }
+            }
+            if (d[j] < -1e-6 && z-d[j] > UB+1e-6)
+            {
+               k = head[m+j];
+               if (k > m)
+                  {
+                  varfix1_array[k-m] = 1;
+                  varfix_itrcount += 1; 
+                  } 
+            }
+         }
+         xfprintf(varfix_itr, "%d\n", varfix_itrcount);
+      }
+      /* invalidate factorization so that not change any previous steps*/
+      // lp->valid = 0;
 
       goto loop;
 fini:
@@ -1896,12 +1934,25 @@ fini:
       for (j = 1; j <= n-m; j++)
       {
          if (varfix0_array[j] == 1)
+         {  
+            varfix0count += 1;
             xfprintf(varfix0, "%d\n", j);
+         }
          if (varfix1_array[j] == 1)
+         {
+            varfix1count += 1;
             xfprintf(varfix1, "%d\n", j);
+         }
+         if (varfix0_array[j] == 1 && varfix1_array[j] == 1)
+            varfixintseccount += 1;
       }
+      xprintf("Number of variables fixed to 0: %d \n", varfix0count);
+      xprintf("Number of variables fixed to 1: %d \n", varfix1count);
+      /* should be zero*/
+      xprintf("Number of common variables fixed: %d \n", varfixintseccount);
       glp_close(varfix0);
       glp_close(varfix1);
+      glp_close(varfix_itr);
       return ret;
 }
 
